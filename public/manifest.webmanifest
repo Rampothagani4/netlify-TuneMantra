@@ -1,0 +1,10 @@
+{
+  "name": "TuneMantra",
+  "short_name": "TuneMantra",
+  "description": "Find a song. Keep it forever.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1c1410",
+  "theme_color": "#1c1410",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
