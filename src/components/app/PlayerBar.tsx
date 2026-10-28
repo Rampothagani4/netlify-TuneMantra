@@ -1,14 +1,15 @@
 import { Loader2, Pause, Play, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { usePlayer } from '@/components/player/PlayerProvider'
+import { usePlayer, usePlayerProgress } from '@/components/player/PlayerProvider'
 import { formatTime } from '@/lib/tracks'
 import { Artwork } from './Artwork'
 import { ReactionButtons } from './ReactionButtons'
 
 export function PlayerBar() {
   const p = usePlayer()
+  const { position, duration: playedDuration } = usePlayerProgress()
   const { current } = p
-  const duration = p.duration || current?.duration || 0
+  const duration = playedDuration || current?.duration || 0
   const VolumeIcon = p.volume === 0 ? VolumeX : p.volume < 50 ? Volume1 : Volume2
 
   return (
@@ -52,18 +53,18 @@ export function PlayerBar() {
             </Button>
           </div>
           <div className="hidden w-full max-w-xl items-center gap-2 text-xs tabular-nums text-muted-foreground sm:flex">
-            <span className="w-10 text-right">{formatTime(p.position)}</span>
+            <span className="w-10 text-right">{formatTime(position)}</span>
             <input
               type="range"
               min={0}
               max={duration || 1}
               step={1}
-              value={Math.min(p.position, duration || 1)}
+              value={Math.min(position, duration || 1)}
               onChange={(e) => p.seek(Number(e.target.value))}
               disabled={!current || !duration}
               className="tm-range h-1 flex-1"
               aria-label="Seek"
-              aria-valuetext={`${formatTime(p.position)} of ${formatTime(duration)}`}
+              aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
             />
             <span className="w-10">{formatTime(duration)}</span>
           </div>
@@ -91,7 +92,7 @@ export function PlayerBar() {
       </div>
       {/* Thin progress line for small screens, where the seek bar is hidden. */}
       <div className="h-0.5 bg-muted sm:hidden" aria-hidden>
-        <div className="h-full bg-primary" style={{ width: duration ? `${(p.position / duration) * 100}%` : 0 }} />
+        <div className="h-full bg-primary" style={{ width: duration ? `${(position / duration) * 100}%` : 0 }} />
       </div>
     </div>
   )

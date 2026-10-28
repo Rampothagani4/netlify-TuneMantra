@@ -1,4 +1,5 @@
 import type { Track } from '@/lib/tracks'
+import { cacheKey, remember } from './cache'
 
 // Songs, not videos: we skip live streams, shorts and long uploads, and rank
 // audio uploads (YouTube "Topic" channels, "Official Audio") first.
@@ -186,8 +187,22 @@ export interface SearchOptions {
   limit?: number
 }
 
-/** Searches YouTube for playable songs, using the Data API when a key is configured. */
-export async function searchSongs(query: string, { recent = false, limit = 18 }: SearchOptions = {}) {
+// Song lookups barely change, so they are cached for half a day; "new this
+// month" searches go stale faster.
+const TTL_SECONDS = 12 * 60 * 60
+const RECENT_TTL_SECONDS = 60 * 60
+
+/**
+ * Searches YouTube for playable songs, using the Data API when a key is
+ * configured. Results come from the shared cache when this search ran recently.
+ */
+export function searchSongs(query: string, { recent = false, limit = 18 }: SearchOptions = {}) {
+  return remember(cacheKey('youtube', recent, limit, query), recent ? RECENT_TTL_SECONDS : TTL_SECONDS, () =>
+    searchSongsUncached(query, recent, limit),
+  )
+}
+
+async function searchSongsUncached(query: string, recent: boolean, limit: number): Promise<Track[]> {
   const key = process.env.YOUTUBE_API_KEY
   const raw = key ? await searchByApi(query, key, recent) : await searchByScrape(`${query} audio`, recent)
   const seen = new Set<string>()
