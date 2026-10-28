@@ -26,7 +26,7 @@ export function SignInDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const [mode, setMode] = useState<'choose' | 'login' | 'signup'>('choose')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [googleEnabled, setGoogleEnabled] = useState(true)
+  const [googleEnabled, setGoogleEnabled] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -34,7 +34,7 @@ export function SignInDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     setError(null)
     getSettings()
       .then((settings) => setGoogleEnabled(settings.providers.google))
-      .catch(() => setGoogleEnabled(true))
+      .catch(() => setGoogleEnabled(false))
   }, [open])
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
