@@ -1,7 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import type { Track } from '@/lib/tracks'
-import { offlineStore } from '@/lib/offline-store'
+import { listenCache, offlineStore } from '@/lib/offline-store'
 import { YT_STATE, loadYouTubeApi, type YTPlayer } from '@/lib/youtube-player'
 
 interface PlayerApi {
@@ -10,8 +10,6 @@ interface PlayerApi {
   current: Track | null
   isPlaying: boolean
   isLoading: boolean
-  position: number
-  duration: number
   volume: number
   /** Play a track; when a list is given it becomes the queue (like playing from an album). */
   play: (track: Track, list?: Track[]) => void
@@ -27,7 +25,20 @@ interface PlayerApi {
   setVolume: (volume: number) => void
 }
 
+// Playback position changes several times a second, so it has its own context:
+// only the progress bar re-renders while a song plays, not every track row.
+interface PlayerProgress {
+  position: number
+  duration: number
+}
+
 const PlayerContext = createContext<PlayerApi | null>(null)
+const ProgressContext = createContext<PlayerProgress>({ position: 0, duration: 0 })
+
+function prefersLightData() {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+  return Boolean(connection?.saveData)
+}
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<Track[]>([])
@@ -46,10 +57,39 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const objectUrlRef = useRef<string | null>(null)
   const volumeRef = useRef(volume)
   const sourceRef = useRef<Track['source'] | null>(null)
+  const positionRef = useRef(0)
+  const caching = useRef(new Set<string>())
   const actionsRef = useRef({ next: () => {}, prev: () => {}, toggle: () => {} })
 
   const current = queue[index] ?? null
   sourceRef.current = current?.source ?? null
+  positionRef.current = position
+  const upcoming = queue[index + 1] ?? null
+  const upcomingRef = useRef(upcoming)
+  upcomingRef.current = upcoming
+
+  // Listening cache: a Creative Commons song is fetched once through the
+  // server-side song cache and kept on this device, so the next play starts
+  // instantly (and works offline). YouTube audio is never stored.
+  const cacheForReplay = useCallback(async (track: Track | null) => {
+    if (!track || track.source !== 'jamendo' || caching.current.has(track.id)) return
+    if (!navigator.onLine || prefersLightData()) return
+    caching.current.add(track.id)
+    try {
+      const [saved, listened] = await Promise.all([
+        offlineStore.get(track.id).catch(() => undefined),
+        listenCache.get(track.id).catch(() => undefined),
+      ])
+      if (saved || listened) return
+      const res = await fetch(`/api/stream?id=${encodeURIComponent(track.id.replace(/^jm:/, ''))}`)
+      if (!res.ok) return
+      await listenCache.put({ id: track.id, blob: await res.blob(), playedAt: Date.now() })
+    } catch {
+      // Caching is a bonus; playback never depends on it.
+    } finally {
+      caching.current.delete(track.id)
+    }
+  }, [])
 
   // HTML audio engine for Creative Commons tracks and offline downloads.
   useEffect(() => {
@@ -158,13 +198,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       ytRef.current?.pauseVideo()
       void (async () => {
         const saved = await offlineStore.get(current.id).catch(() => undefined)
+        const listened = saved ? undefined : await listenCache.get(current.id).catch(() => undefined)
         if (cancelled || !audio) return
         if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
         objectUrlRef.current = null
         let src = current.streamUrl
-        if (saved) {
-          src = URL.createObjectURL(saved.blob)
+        const blob = saved?.blob ?? listened?.blob
+        if (blob) {
+          src = URL.createObjectURL(blob)
           objectUrlRef.current = src
+          if (listened) void listenCache.touch(listened).catch(() => {})
         } else if (!navigator.onLine) {
           setIsLoading(false)
           toast.error("You're offline and this track isn't downloaded.")
@@ -172,10 +215,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }
         if (!src) return
         audio.src = src
-        audio.play().catch(() => {
-          setIsLoading(false)
-          setIsPlaying(false)
-        })
+        audio
+          .play()
+          .then(async () => {
+            // Keep this song for next time, then get the next one in the queue ready.
+            await cacheForReplay(current)
+            if (!cancelled) await cacheForReplay(upcomingRef.current)
+          })
+          .catch(() => {
+            setIsLoading(false)
+            setIsPlaying(false)
+          })
       })()
     }
     return () => {
@@ -183,6 +233,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, playKey, getYouTube])
+
+  // Load the YouTube player in the background so the first song starts faster.
+  useEffect(() => {
+    const warm = () => void getYouTube().catch(() => {})
+    if ('requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(warm, { timeout: 4000 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const id = window.setTimeout(warm, 2000)
+    return () => window.clearTimeout(id)
+  }, [getYouTube])
 
   // The YouTube player has no time events, so poll while it plays.
   useEffect(() => {
@@ -246,7 +307,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
 
   const prev = () => {
-    if (position > 3 || index <= 0) seek(0)
+    if (positionRef.current > 3 || index <= 0) seek(0)
     else playAt(index - 1)
   }
 
@@ -295,36 +356,43 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     navigator.mediaSession.setActionHandler('previoustrack', () => actionsRef.current.prev())
   }, [current])
 
+  // Rebuilt only when what the controls show changes, never on position ticks.
+  const api = useMemo<PlayerApi>(
+    () => ({
+      queue,
+      index,
+      current,
+      isPlaying,
+      isLoading,
+      volume,
+      play,
+      playAt,
+      addToQueue,
+      playNext,
+      removeAt,
+      clearUpcoming,
+      toggle,
+      next,
+      prev,
+      seek,
+      setVolume,
+    }),
+    // The actions read only the state listed here (position comes from a ref).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [queue, index, current, isPlaying, isLoading, volume, play, playAt],
+  )
+  const progress = useMemo(() => ({ position, duration }), [position, duration])
+
   return (
-    <PlayerContext.Provider
-      value={{
-        queue,
-        index,
-        current,
-        isPlaying,
-        isLoading,
-        position,
-        duration,
-        volume,
-        play,
-        playAt,
-        addToQueue,
-        playNext,
-        removeAt,
-        clearUpcoming,
-        toggle,
-        next,
-        prev,
-        seek,
-        setVolume,
-      }}
-    >
-      {children}
-      <div
-        ref={ytHostRef}
-        aria-hidden="true"
-        className="pointer-events-none fixed bottom-0 left-0 h-px w-px overflow-hidden opacity-0"
-      />
+    <PlayerContext.Provider value={api}>
+      <ProgressContext.Provider value={progress}>
+        {children}
+        <div
+          ref={ytHostRef}
+          aria-hidden="true"
+          className="pointer-events-none fixed bottom-0 left-0 h-px w-px overflow-hidden opacity-0"
+        />
+      </ProgressContext.Provider>
     </PlayerContext.Provider>
   )
 }
@@ -333,4 +401,8 @@ export function usePlayer() {
   const ctx = useContext(PlayerContext)
   if (!ctx) throw new Error('PlayerProvider is required')
   return ctx
+}
+
+export function usePlayerProgress() {
+  return useContext(ProgressContext)
 }

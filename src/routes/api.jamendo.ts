@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import type { Track } from '@/lib/tracks'
+import { cacheKey, remember } from '@/server/cache'
 
 interface JamendoTrack {
   id: string
@@ -32,20 +33,28 @@ export const Route = createFileRoute('/api/jamendo')({
         })
         if (query) params.set('search', query)
         try {
-          const res = await fetch(`https://api.jamendo.com/v3.0/tracks/?${params}`)
-          if (!res.ok) throw new Error(`Jamendo responded ${res.status}`)
-          const data = (await res.json()) as { results?: JamendoTrack[] }
-          const tracks: Track[] = (data.results ?? []).map((t) => ({
-            id: `jm:${t.id}`,
-            source: 'jamendo',
-            title: t.name,
-            artist: t.artist_name,
-            artwork: t.album_image || t.image || '',
-            duration: t.duration,
-            streamUrl: t.audio,
-            downloadUrl: t.audiodownload_allowed !== false ? t.audiodownload || t.audio : undefined,
-            license: t.license_ccurl,
-          }))
+          // Weekly charts refresh hourly; searches are cached for half a day.
+          const tracks = await remember(
+            cacheKey('jamendo', query || ':popular'),
+            query ? 12 * 3600 : 3600,
+            async () => {
+              const res = await fetch(`https://api.jamendo.com/v3.0/tracks/?${params}`)
+              if (!res.ok) throw new Error(`Jamendo responded ${res.status}`)
+              const data = (await res.json()) as { results?: JamendoTrack[] }
+              const found: Track[] = (data.results ?? []).map((t) => ({
+                id: `jm:${t.id}`,
+                source: 'jamendo',
+                title: t.name,
+                artist: t.artist_name,
+                artwork: t.album_image || t.image || '',
+                duration: t.duration,
+                streamUrl: t.audio,
+                downloadUrl: t.audiodownload_allowed !== false ? t.audiodownload || t.audio : undefined,
+                license: t.license_ccurl,
+              }))
+              return found
+            },
+          )
           return Response.json({ tracks }, { headers: { 'Cache-Control': 'public, max-age=600' } })
         } catch (error) {
           console.error('Jamendo search failed', error)
