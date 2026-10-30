@@ -7,6 +7,10 @@ import { formatTime } from '@/lib/tracks'
 import { cn } from '@/lib/utils'
 import { Artwork } from './Artwork'
 import { TrackRow, TrackListSkeleton } from './TrackRow'
+import { LatestTeluguRow } from './SouthCinema'
+
+const LANGUAGES = ['Telugu', 'Tamil', 'Malayalam', 'Kannada', 'Hindi']
+const LANGUAGE_WORD = new RegExp(`\\s*\\b(?:${LANGUAGES.join('|')})\\b\\s*`, 'gi')
 
 type Filter = 'all' | 'songs' | 'free'
 
@@ -15,9 +19,11 @@ interface SearchResultsProps {
   songs: { status: 'idle' | 'loading' | 'done' | 'error'; tracks: Track[]; error?: string }
   free: { status: 'idle' | 'loading' | 'done' | 'error'; tracks: Track[]; error?: string }
   onRequireSignIn: () => void
+  onSearch: (q: string) => void
+  online: boolean
 }
 
-export function SearchResults({ query, songs, free, onRequireSignIn }: SearchResultsProps) {
+export function SearchResults({ query, songs, free, onRequireSignIn, onSearch, online }: SearchResultsProps) {
   const [filter, setFilter] = useState<Filter>('all')
   const player = usePlayer()
 
@@ -30,6 +36,9 @@ export function SearchResults({ query, songs, free, onRequireSignIn }: SearchRes
   const songList = songs.status === 'done' ? songs.tracks : []
   const freeList = free.status === 'done' ? free.tracks : []
   const loading = songs.status === 'loading' || free.status === 'loading'
+
+  const baseQuery = query.replace(LANGUAGE_WORD, ' ').replace(/\s{2,}/g, ' ').trim()
+  const language = LANGUAGES.find((l) => new RegExp(`\\b${l}\\b`, 'i').test(query)) ?? null
 
   const chips: { id: Filter; label: string }[] = [
     { id: 'all', label: 'All' },
@@ -56,6 +65,28 @@ export function SearchResults({ query, songs, free, onRequireSignIn }: SearchRes
             {c.label}
           </button>
         ))}
+        {baseQuery && (
+          <>
+            <span className="mx-1 self-center text-xs text-muted-foreground">Language:</span>
+            {LANGUAGES.map((l) => (
+              <button
+                key={l}
+                type="button"
+                aria-pressed={language === l}
+                onClick={() => onSearch(language === l ? baseQuery : `${baseQuery} ${l}`)}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-xs transition-colors',
+                  'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  language === l
+                    ? 'border-saffron bg-saffron/15 text-saffron'
+                    : 'border-border/70 text-muted-foreground hover:border-saffron/60 hover:text-foreground',
+                )}
+              >
+                {l}
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
       {loading && <TrackListSkeleton rows={6} />}
@@ -167,15 +198,34 @@ export function SearchResults({ query, songs, free, onRequireSignIn }: SearchRes
         free.status === 'done' &&
         !songList.length &&
         !freeList.length && (
-          <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-            No results for “{query}”. Try another artist, song, or mood.
-          </p>
+          <div className="space-y-3 rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+            <p>No results for “{query}”. Check the spelling, or try a movie name, singer or music director.</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {['Latest Telugu songs', 'Telugu love songs', 'Thaman S hits', 'Sid Sriram melodies'].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => onSearch(q)}
+                  className="rounded-full border bg-card px-3 py-1 text-xs text-foreground hover:border-primary hover:text-primary"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
-      {(songs.status === 'error' || free.status === 'error') && (
+      {songs.status === 'error' && (
         <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
-          {songs.error || free.error || 'Search failed'}
+          {songs.error || 'Search failed'}{' '}
+          <button type="button" onClick={() => onSearch(query)} className="font-medium underline underline-offset-2">
+            Try again
+          </button>
         </p>
+      )}
+
+      {!loading && !/latest\s+telugu/i.test(query) && (
+        <LatestTeluguRow online={online} title="Meanwhile, the latest Telugu songs" />
       )}
     </div>
   )

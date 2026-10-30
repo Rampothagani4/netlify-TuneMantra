@@ -1,8 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { Menu, Search, X } from 'lucide-react'
+import { Menu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { DownloadsView } from '@/components/app/DownloadsView'
 import { HomeFeed } from '@/components/app/HomeFeed'
@@ -11,11 +10,14 @@ import { LibraryView, PlaylistDetail } from '@/components/app/PlaylistView'
 import { MantraChat } from '@/components/app/MantraChat'
 import { NowPlaying } from '@/components/app/NowPlaying'
 import { PlayerBar } from '@/components/app/PlayerBar'
+import { SearchBox } from '@/components/app/SearchBox'
 import { SearchResults } from '@/components/app/SearchResults'
+import { LatestTeluguRow, SouthCinema } from '@/components/app/SouthCinema'
 import { Sidebar, type AppView } from '@/components/app/Sidebar'
 import { SignInDialog } from '@/components/app/SignInDialog'
 import { KeyboardShortcuts } from '@/components/app/KeyboardShortcuts'
 import { searchTracks } from '@/components/app/search-api'
+import { rememberSearch } from '@/lib/recent-searches'
 import type { Track } from '@/lib/tracks'
 import { useOnline } from '@/lib/use-online'
 import { cn } from '@/lib/utils'
@@ -80,16 +82,12 @@ function Home() {
   const runSearch = (q: string) => {
     const trimmed = q.trim()
     if (!trimmed) return
+    rememberSearch(trimmed)
     setDraft(trimmed)
     setQuery({ q: trimmed, nonce: Date.now() })
     setView('search')
     setPlaylistId(null)
     setMobileNav(false)
-  }
-
-  const submitSearch = (e: FormEvent) => {
-    e.preventDefault()
-    runSearch(draft)
   }
 
   const clearSearch = () => {
@@ -148,33 +146,19 @@ function Home() {
               </SheetContent>
             </Sheet>
 
-            <form onSubmit={submitSearch} role="search" className="relative mx-auto w-full max-w-xl flex-1">
-              <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onFocus={() => {
-                  if (view !== 'search') {
-                    setView('search')
-                    setPlaylistId(null)
-                  }
-                }}
-                placeholder="What do you want to listen to?"
-                className="h-11 rounded-full border-border/60 bg-background/80 pl-10 pr-10 text-sm shadow-sm"
-                autoComplete="off"
-                disabled={!online}
-              />
-              {draft && (
-                <button
-                  type="button"
-                  onClick={clearSearch}
-                  className="absolute top-1/2 right-3 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:text-foreground"
-                  aria-label="Clear search"
-                >
-                  <X className="size-4" />
-                </button>
-              )}
-            </form>
+            <SearchBox
+              value={draft}
+              onChange={setDraft}
+              onSearch={runSearch}
+              onClear={clearSearch}
+              onFocus={() => {
+                if (view !== 'search') {
+                  setView('search')
+                  setPlaylistId(null)
+                }
+              }}
+              disabled={!online}
+            />
           </header>
 
           <main
@@ -194,25 +178,44 @@ function Home() {
                   songs={songs}
                   free={free}
                   onRequireSignIn={requireSignIn}
+                  onSearch={runSearch}
+                  online={online}
                 />
               )}
 
               {view === 'search' && !showSearchResults && (
-                <div className="space-y-4">
-                  <h1 className="font-display text-2xl font-bold">Search</h1>
-                  <p className="text-muted-foreground">Type a song, artist, or mood in the bar above.</p>
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {['Arijit Singh', 'Lo-fi', 'Rahman', 'Punjabi hits', 'Coldplay'].map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => runSearch(m)}
-                        className="rounded-full border bg-card px-3.5 py-1.5 text-sm hover:border-primary hover:text-primary"
-                      >
-                        {m}
-                      </button>
-                    ))}
+                <div className="space-y-8">
+                  <div className="space-y-3">
+                    <h1 className="font-display text-2xl font-bold">Search</h1>
+                    <p className="text-muted-foreground">
+                      Type a song, movie, singer, music director or hero above, or start with one of these.
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {[
+                        'Latest Telugu songs',
+                        'Telugu love songs',
+                        'Thaman S hits',
+                        'Devi Sri Prasad hits',
+                        'Sid Sriram melodies',
+                        'Anirudh mass songs',
+                        'Ilaiyaraaja classics',
+                        'A. R. Rahman',
+                        'Arijit Singh',
+                        'Lo-fi',
+                      ].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => runSearch(m)}
+                          className="rounded-full border bg-card px-3.5 py-1.5 text-sm hover:border-primary hover:text-primary"
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  <LatestTeluguRow online={online} />
+                  <SouthCinema online={online} onSearch={runSearch} />
                 </div>
               )}
 

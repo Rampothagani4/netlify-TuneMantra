@@ -29,22 +29,28 @@ function persist() {
   }
 }
 
-const keyOf = (source: string, query: string) => `${source}:${query.trim().toLowerCase()}`
+const keyOf = (source: string, query: string, recent = false) =>
+  `${source}:${recent ? 'recent:' : ''}${query.trim().toLowerCase()}`
 
 /** Results from this session's cache, if the same search ran in the last few minutes. */
-export function cachedTracks(source: 'youtube' | 'jamendo', query: string) {
-  const entry = cache().get(keyOf(source, query))
+export function cachedTracks(source: 'youtube' | 'jamendo', query: string, recent = false) {
+  const entry = cache().get(keyOf(source, query, recent))
   return entry && Date.now() - entry.at < TTL_MS ? entry.tracks : null
 }
 
-export async function searchTracks(source: 'youtube' | 'jamendo', query: string, signal?: AbortSignal) {
-  const hit = cachedTracks(source, query)
+export async function searchTracks(
+  source: 'youtube' | 'jamendo',
+  query: string,
+  signal?: AbortSignal,
+  { recent = false }: { recent?: boolean } = {},
+) {
+  const hit = cachedTracks(source, query, recent)
   if (hit) return hit
-  const res = await fetch(`/api/${source}?q=${encodeURIComponent(query)}`, { signal })
+  const res = await fetch(`/api/${source}?q=${encodeURIComponent(query)}${recent ? '&recent=1' : ''}`, { signal })
   const body = (await res.json().catch(() => null)) as { tracks?: Track[]; error?: string } | null
   if (!res.ok) throw new Error(body?.error ?? 'Search failed')
   const tracks = body?.tracks ?? []
-  const key = keyOf(source, query)
+  const key = keyOf(source, query, recent)
   cache().delete(key)
   cache().set(key, { tracks, at: Date.now() })
   while (cache().size > MAX_ENTRIES) cache().delete(cache().keys().next().value as string)

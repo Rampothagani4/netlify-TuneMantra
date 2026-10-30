@@ -48,7 +48,10 @@ export const Route = createRootRoute({
         name: 'twitter:card',
         content: 'summary_large_image',
       },
-      { name: 'theme-color', content: '#1c1410' },
+      { name: 'theme-color', content: '#140e0b' },
+      // YouTube's embedded player needs to see the page origin, or it can fail
+      // with "An error occurred. Please try again later."
+      { name: 'referrer', content: 'strict-origin-when-cross-origin' },
     ],
     links: [
       { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
