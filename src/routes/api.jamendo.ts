@@ -20,7 +20,8 @@ export const Route = createFileRoute('/api/jamendo')({
     handlers: {
       GET: async ({ request }) => {
         const clientId = process.env.JAMENDO_CLIENT_ID
-        if (!clientId) return Response.json({ error: 'Free downloads are not configured' }, { status: 503 })
+        // Without a Jamendo key the free-music rows simply stay hidden.
+        if (!clientId) return Response.json({ tracks: [] })
         const query = new URL(request.url).searchParams.get('q')?.trim().slice(0, 120) ?? ''
         const params = new URLSearchParams({
           client_id: clientId,

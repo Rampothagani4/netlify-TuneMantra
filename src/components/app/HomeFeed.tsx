@@ -5,18 +5,24 @@ import { useReactions } from '@/components/player/ReactionsProvider'
 import { clearRecentlyPlayed, listRecentlyPlayed, subscribeRecentlyPlayed } from '@/lib/recently-played'
 import { searchTracks } from './search-api'
 import { ArtistRow } from './ArtistRow'
+import { LatestTeluguRow, SouthCinema } from './SouthCinema'
 import { TrackCardRow, TrackCardSkeleton } from './TrackCard'
 import { TrackListSkeleton, TrackRow } from './TrackRow'
 
 const MOODS = [
+  'Latest Telugu songs',
+  'Thaman S hits',
+  'Devi Sri Prasad hits',
+  'Sid Sriram melodies',
+  'Anirudh mass songs',
+  'A. R. Rahman',
+  'Telugu love songs',
+  'Tamil kuthu songs',
+  'Malayalam melodies',
+  'Kannada hits',
+  'Ilaiyaraaja classics',
   'Arijit Singh',
   'Lo-fi study beats',
-  'A. R. Rahman',
-  '90s rock anthems',
-  'Late night jazz',
-  'Punjabi hits',
-  'Coldplay',
-  'Carnatic fusion',
 ]
 
 type Section = { status: 'idle' | 'loading' | 'done' | 'error'; tracks: Track[]; error?: string }
@@ -54,7 +60,7 @@ export function HomeFeed({ online, onRequireSignIn, onSearch }: HomeFeedProps) {
       })
 
     setRecommended({ status: 'loading', tracks: [] })
-    searchTracks('youtube', 'Arijit Singh', controller.signal)
+    searchTracks('youtube', 'telugu superhit songs', controller.signal)
       .then((tracks) => setRecommended({ status: 'done', tracks: tracks.slice(0, 12) }))
       .catch((e: Error) => {
         if (e.name !== 'AbortError') setRecommended({ status: 'error', tracks: [], error: e.message })
@@ -121,6 +127,10 @@ export function HomeFeed({ online, onRequireSignIn, onSearch }: HomeFeedProps) {
         )}
       </section>
 
+      <LatestTeluguRow online={online} />
+
+      <SouthCinema online={online} onSearch={onSearch} />
+
       {recent.length > 0 && (
         <TrackCardRow
           title="Recently played"
@@ -173,7 +183,7 @@ export function HomeFeed({ online, onRequireSignIn, onSearch }: HomeFeedProps) {
             <>
               <TrackCardRow
                 title="Recommended"
-                subtitle="Popular picks to start listening"
+                subtitle="Tollywood superhits to start listening"
                 tracks={recommended.tracks}
                 action={
                   <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -209,11 +219,6 @@ export function HomeFeed({ online, onRequireSignIn, onSearch }: HomeFeedProps) {
               />
               <ArtistRow title="Independent artists" tracks={free.tracks} />
             </>
-          )}
-          {free.status === 'error' && (
-            <p role="alert" className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm">
-              {free.error}
-            </p>
           )}
         </>
       )}

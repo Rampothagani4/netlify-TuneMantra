@@ -13,16 +13,30 @@ import {
 import { useIdentity } from '@/components/IdentityProvider'
 import { cn } from '@/lib/utils'
 
+/** A bold, flat mark: a play triangle cut from a rounded tile, with a sound-wave notch. */
+export function LogoMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" className={cn('size-8', className)} aria-hidden>
+      <defs>
+        <linearGradient id="tm-mark" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="var(--saffron)" />
+          <stop offset="0.55" stopColor="var(--primary)" />
+          <stop offset="1" stopColor="oklch(0.5 0.2 25)" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="9" fill="url(#tm-mark)" />
+      <path d="M12 9.5v13a1 1 0 0 0 1.5.86l10.6-6.5a1 1 0 0 0 0-1.72L13.5 8.64A1 1 0 0 0 12 9.5z" fill="var(--background)" />
+      <rect x="6.5" y="12" width="2.2" height="8" rx="1.1" fill="var(--background)" opacity="0.85" />
+    </svg>
+  )
+}
+
 export function Logo() {
   return (
-    <span className="flex items-center gap-2">
-      <svg viewBox="0 0 32 32" className="size-8" aria-hidden>
-        <circle cx="16" cy="16" r="15" fill="var(--primary)" />
-        <circle cx="16" cy="16" r="10" fill="none" stroke="var(--background)" strokeWidth="1.5" strokeDasharray="2 3" />
-        <path d="M13 10v9.2a3 3 0 1 0 2 2.8V13.5l6-1.5v-3z" fill="var(--background)" />
-      </svg>
-      <span className="font-display text-xl font-extrabold tracking-tight">
-        Tune<span className="text-primary">Mantra</span>
+    <span className="flex items-center gap-2.5">
+      <LogoMark />
+      <span className="font-display text-[1.35rem] leading-none font-extrabold tracking-[-0.04em]">
+        TUNE<span className="text-primary">MANTRA</span>
       </span>
     </span>
   )

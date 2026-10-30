@@ -1,5 +1,5 @@
 // Minimal typings and loader for the YouTube IFrame Player API. TuneMantra
-// keeps the player out of sight and uses it purely as an audio engine.
+// keeps the player out of sight (unless video mode is on) and uses it as an audio engine.
 
 export interface YTPlayer {
   loadVideoById(id: string): void
@@ -20,6 +20,7 @@ interface YTNamespace {
     options: {
       width?: number
       height?: number
+      host?: string
       playerVars?: Record<string, number | string>
       events?: {
         onReady?: () => void

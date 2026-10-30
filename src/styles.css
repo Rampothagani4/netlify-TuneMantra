@@ -21,9 +21,9 @@ code {
   --font-heading: 'Bricolage Grotesque', 'DM Sans', ui-sans-serif, sans-serif;
   --content-width: 80rem;
   --reading-width: 42rem;
-  --background: oklch(0.16 0.012 40);
+  --background: oklch(0.13 0.008 40);
   --foreground: oklch(0.96 0.01 70);
-  --card: oklch(0.2 0.014 40);
+  --card: oklch(0.18 0.01 40);
   --card-foreground: oklch(0.96 0.01 70);
   --popover: oklch(0.22 0.016 40);
   --popover-foreground: oklch(0.96 0.01 70);
@@ -47,7 +47,7 @@ code {
   --chart-4: oklch(0.7 0.14 150);
   --chart-5: oklch(0.65 0.18 330);
   --radius: 0.875rem;
-  --sidebar: oklch(0.18 0.012 40);
+  --sidebar: oklch(0.11 0.006 40);
   --sidebar-foreground: oklch(0.96 0.01 70);
   --sidebar-primary: oklch(0.67 0.2 36);
   --sidebar-primary-foreground: oklch(0.15 0.02 40);
@@ -189,6 +189,19 @@ code {
 }
 .tm-glow {
   background:
-    radial-gradient(60rem 30rem at 10% -10%, oklch(0.67 0.2 36 / 0.18), transparent 60%),
-    radial-gradient(40rem 24rem at 100% 0%, oklch(0.82 0.15 78 / 0.08), transparent 60%);
+    radial-gradient(70rem 32rem at 0% -20%, oklch(0.67 0.2 36 / 0.14), transparent 60%),
+    radial-gradient(50rem 26rem at 100% -10%, oklch(0.82 0.15 78 / 0.06), transparent 60%),
+    linear-gradient(180deg, oklch(0.13 0.008 40), oklch(0.11 0.006 40));
+}
+/* Cinematic headings and quieter surfaces, closer to streaming apps. */
+h1.font-display,
+h2.font-display {
+  letter-spacing: -0.03em;
+}
+::selection {
+  background: oklch(0.67 0.2 36 / 0.35);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.35 0.01 40) transparent;
 }

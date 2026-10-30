@@ -13,8 +13,13 @@ import type { Track } from '@/lib/tracks'
 import { listenCache, offlineStore } from '@/lib/offline-store'
 import { recordPlayed } from '@/lib/recently-played'
 import { YT_STATE, loadYouTubeApi, type YTPlayer } from '@/lib/youtube-player'
+import { searchTracks } from '@/components/app/search-api'
 
 const VIDEO_MODE_KEY = 'tm-video-mode'
+/** Some uploads show YouTube's "An error occurred" screen without firing onError. */
+const STALL_MS = 12_000
+/** How many other uploads of the same song to try before skipping it. */
+const MAX_ALTERNATES = 3
 
 interface PlayerApi {
   queue: Track[]
@@ -87,8 +92,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const positionRef = useRef(0)
   const caching = useRef(new Set<string>())
   const actionsRef = useRef({ next: () => {}, prev: () => {}, toggle: () => {} })
+  const recoverRef = useRef<() => void>(() => {})
+  const stallTimer = useRef<number | null>(null)
+  // Video ids that failed in this session, and how many alternates the current slot has tried.
+  const failedIds = useRef(new Set<string>())
+  const attempts = useRef({ key: '', count: 0 })
 
   const current = queue[index] ?? null
+  const queueRef = useRef(queue)
+  queueRef.current = queue
+  const indexRef = useRef(index)
+  indexRef.current = index
   sourceRef.current = current?.source ?? null
   positionRef.current = position
   const upcoming = queue[index + 1] ?? null
@@ -164,10 +178,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       iframe.removeAttribute('width')
       iframe.removeAttribute('height')
     } else {
-      // Return to 1px hidden host
+      // Return to the hidden host. YouTube refuses to play in players smaller
+      // than 200×200, so it stays full size and is hidden with opacity instead.
       if (iframe.parentElement !== host) host.appendChild(iframe)
-      iframe.style.width = '1px'
-      iframe.style.height = '1px'
+      iframe.style.width = '100%'
+      iframe.style.height = '100%'
       iframe.style.position = ''
       iframe.style.inset = ''
     }
@@ -219,9 +234,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             ytHostRef.current?.appendChild(el)
             const isActive = () => sourceRef.current === 'youtube'
             const player = new YT.Player(el, {
-              width: 480,
-              height: 270,
+              width: 320,
+              height: 240,
+              host: 'https://www.youtube.com',
               playerVars: {
+                // Without the page origin, YouTube may refuse playback with
+                // "An error occurred. Please try again later."
+                origin: window.location.origin,
+                widget_referrer: window.location.href,
+                enablejsapi: 1,
                 playsinline: 1,
                 controls: 1,
                 disablekb: 0,
@@ -251,7 +272,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 },
                 onStateChange: ({ data }) => {
                   if (!isActive()) return
+                  if (data === YT_STATE.PLAYING || data === YT_STATE.PAUSED || data === YT_STATE.ENDED)
+                    clearStall()
                   if (data === YT_STATE.PLAYING) {
+                    attempts.current.count = 0
                     setIsPlaying(true)
                     setIsLoading(false)
                     const d = player.getDuration()
@@ -262,9 +286,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 },
                 onError: () => {
                   if (!isActive()) return
-                  setIsLoading(false)
-                  toast.error("This song can't be streamed here. Skipping ahead.")
-                  actionsRef.current.next()
+                  recoverRef.current()
                 },
               },
             })
@@ -276,6 +298,43 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     return ytPromise.current
   }, [])
+
+  function clearStall() {
+    if (stallTimer.current !== null) window.clearTimeout(stallTimer.current)
+    stallTimer.current = null
+  }
+
+  // When an upload won't play (blocked in embeds, region locked, or YouTube's
+  // "An error occurred" screen), swap in another upload of the same song in
+  // place, and only skip ahead when none of them work.
+  const recoverYouTube = async () => {
+    clearStall()
+    const track = current
+    if (!track || track.source !== 'youtube') return
+    if (track.videoId) failedIds.current.add(track.videoId)
+    const slot = `${index}:${queue[index]?.title}`
+    if (attempts.current.key !== slot) attempts.current = { key: slot, count: 0 }
+    attempts.current.count++
+    const skip = () => {
+      setIsLoading(false)
+      toast.error(`“${track.title}” isn't available right now. Playing the next song.`)
+      attempts.current = { key: '', count: 0 }
+      actionsRef.current.next()
+    }
+    if (attempts.current.count > MAX_ALTERNATES || !navigator.onLine) return skip()
+    setIsLoading(true)
+    try {
+      const found = await searchTracks('youtube', `${track.title} ${track.artist}`)
+      const alternate = found.find((t) => t.videoId && !failedIds.current.has(t.videoId))
+      if (sourceRef.current !== 'youtube' || queueRef.current[indexRef.current]?.id !== track.id) return
+      if (!alternate) return skip()
+      setQueue((q) => q.map((t, i) => (i === indexRef.current ? { ...alternate, title: track.title, artist: track.artist } : t)))
+      setPlayKey((k) => k + 1)
+    } catch {
+      skip()
+    }
+  }
+  recoverRef.current = () => void recoverYouTube()
 
   // Load whichever engine the current track needs.
   useEffect(() => {
@@ -298,6 +357,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           if (cancelled || !current.videoId) return
           player.setVolume(volumeRef.current)
           player.loadVideoById(current.videoId)
+          clearStall()
+          stallTimer.current = window.setTimeout(() => {
+            stallTimer.current = null
+            if (cancelled || sourceRef.current !== 'youtube') return
+            const state = player.getPlayerState()
+            // Still unstarted or cued without ever buffering: the embed is stuck on an error screen.
+            if (state !== YT_STATE.PLAYING && state !== YT_STATE.PAUSED && state !== YT_STATE.BUFFERING)
+              recoverRef.current()
+          }, STALL_MS)
           // After load, ensure iframe placement matches video mode
           requestAnimationFrame(() => placeYouTubeIframe(showVideo))
         })
@@ -343,6 +411,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     return () => {
       cancelled = true
+      clearStall()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, playKey, getYouTube])
@@ -512,7 +581,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         <div
           ref={ytHostRef}
           aria-hidden="true"
-          className="pointer-events-none fixed bottom-0 left-0 h-px w-px overflow-hidden opacity-0"
+          className="pointer-events-none fixed bottom-0 left-0 -z-10 h-[240px] w-[320px] overflow-hidden opacity-0"
         />
         {/* Visible video surface — iframe is moved here in video mode */}
         <div
