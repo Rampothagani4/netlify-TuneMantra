@@ -1,8 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { toast } from 'sonner'
 import type { Track } from '@/lib/tracks'
 import { listenCache, offlineStore } from '@/lib/offline-store'
+import { recordPlayed } from '@/lib/recently-played'
 import { YT_STATE, loadYouTubeApi, type YTPlayer } from '@/lib/youtube-player'
+
+const VIDEO_MODE_KEY = 'tm-video-mode'
 
 interface PlayerApi {
   queue: Track[]
@@ -11,6 +23,11 @@ interface PlayerApi {
   isPlaying: boolean
   isLoading: boolean
   volume: number
+  /** When true, YouTube tracks show the video surface instead of audio-only. */
+  videoMode: boolean
+  setVideoMode: (on: boolean) => void
+  /** True when the current track is YouTube and video mode is on. */
+  showVideo: boolean
   /** Play a track; when a list is given it becomes the queue (like playing from an album). */
   play: (track: Track, list?: Track[]) => void
   playAt: (index: number) => void
@@ -40,6 +57,14 @@ function prefersLightData() {
   return Boolean(connection?.saveData)
 }
 
+function readVideoMode() {
+  try {
+    return localStorage.getItem(VIDEO_MODE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<Track[]>([])
   const [index, setIndex] = useState(-1)
@@ -49,11 +74,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [position, setPosition] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolumeState] = useState(80)
+  const [videoMode, setVideoModeState] = useState(readVideoMode)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const ytRef = useRef<YTPlayer | null>(null)
   const ytPromise = useRef<Promise<YTPlayer> | null>(null)
   const ytHostRef = useRef<HTMLDivElement>(null)
+  const videoSurfaceRef = useRef<HTMLDivElement>(null)
   const objectUrlRef = useRef<string | null>(null)
   const volumeRef = useRef(volume)
   const sourceRef = useRef<Track['source'] | null>(null)
@@ -67,10 +94,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const upcoming = queue[index + 1] ?? null
   const upcomingRef = useRef(upcoming)
   upcomingRef.current = upcoming
+  const showVideo = Boolean(videoMode && current?.source === 'youtube' && current.videoId)
 
-  // Listening cache: a Creative Commons song is fetched once through the
-  // server-side song cache and kept on this device, so the next play starts
-  // instantly (and works offline). YouTube audio is never stored.
+  // Remember what played on this device for the Home “Recently played” row.
+  useEffect(() => {
+    if (current) recordPlayed(current)
+  }, [current?.id])
+
+  const setVideoMode = useCallback((on: boolean) => {
+    setVideoModeState(on)
+    try {
+      localStorage.setItem(VIDEO_MODE_KEY, on ? '1' : '0')
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  // Listening cache: Creative Commons audio is fetched once and kept on device
+  // so the next play starts from a blob URL with almost no buffering.
+  // YouTube audio is never stored (terms of service).
   const cacheForReplay = useCallback(async (track: Track | null) => {
     if (!track || track.source !== 'jamendo' || caching.current.has(track.id)) return
     if (!navigator.onLine || prefersLightData()) return
@@ -80,7 +122,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         offlineStore.get(track.id).catch(() => undefined),
         listenCache.get(track.id).catch(() => undefined),
       ])
-      if (saved || listened) return
+      if (saved || listened) {
+        if (listened) void listenCache.touch(listened).catch(() => {})
+        return
+      }
       const res = await fetch(`/api/stream?id=${encodeURIComponent(track.id.replace(/^jm:/, ''))}`)
       if (!res.ok) return
       await listenCache.put({ id: track.id, blob: await res.blob(), playedAt: Date.now() })
@@ -90,6 +135,47 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       caching.current.delete(track.id)
     }
   }, [])
+
+  // Prefetch the next few Jamendo tracks in the queue for near-instant starts.
+  const prefetchQueue = useCallback(
+    async (fromIndex: number) => {
+      const slice = queue.slice(fromIndex, fromIndex + 3)
+      for (const t of slice) {
+        if (t.source === 'jamendo') await cacheForReplay(t)
+      }
+    },
+    [queue, cacheForReplay],
+  )
+
+  // Move the YouTube iframe between hidden host and visible video surface.
+  const placeYouTubeIframe = useCallback((visible: boolean) => {
+    const host = ytHostRef.current
+    const surface = videoSurfaceRef.current
+    if (!host) return
+    const iframe = host.querySelector('iframe')
+    if (!iframe) return
+    if (visible && surface) {
+      surface.innerHTML = ''
+      surface.appendChild(iframe)
+      iframe.style.width = '100%'
+      iframe.style.height = '100%'
+      iframe.style.position = 'absolute'
+      iframe.style.inset = '0'
+      iframe.removeAttribute('width')
+      iframe.removeAttribute('height')
+    } else {
+      // Return to 1px hidden host
+      if (iframe.parentElement !== host) host.appendChild(iframe)
+      iframe.style.width = '1px'
+      iframe.style.height = '1px'
+      iframe.style.position = ''
+      iframe.style.inset = ''
+    }
+  }, [])
+
+  useEffect(() => {
+    placeYouTubeIframe(showVideo)
+  }, [showVideo, placeYouTubeIframe, current?.id])
 
   // HTML audio engine for Creative Commons tracks and offline downloads.
   useEffect(() => {
@@ -105,6 +191,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       ['pause', () => isActive() && setIsPlaying(false)],
       ['waiting', () => isActive() && setIsLoading(true)],
       ['playing', () => isActive() && setIsLoading(false)],
+      ['canplay', () => isActive() && setIsLoading(false)],
       ['ended', () => isActive() && actionsRef.current.next()],
       [
         'error',
@@ -122,7 +209,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Hidden YouTube player: songs stream as audio only.
+  // YouTube player: audio-only by default; iframe can be shown in video mode.
   const getYouTube = useCallback(() => {
     if (!ytPromise.current) {
       ytPromise.current = loadYouTubeApi().then(
@@ -132,13 +219,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             ytHostRef.current?.appendChild(el)
             const isActive = () => sourceRef.current === 'youtube'
             const player = new YT.Player(el, {
-              width: 200,
-              height: 200,
-              playerVars: { playsinline: 1, controls: 0, disablekb: 1, rel: 0, iv_load_policy: 3 },
+              width: 480,
+              height: 270,
+              playerVars: {
+                playsinline: 1,
+                controls: 1,
+                disablekb: 0,
+                rel: 0,
+                iv_load_policy: 3,
+                modestbranding: 1,
+              },
               events: {
                 onReady: () => {
                   ytRef.current = player
                   resolve(player)
+                  // Place iframe according to current mode
+                  const surface = videoSurfaceRef.current
+                  const wantVideo =
+                    localStorage.getItem(VIDEO_MODE_KEY) === '1' && sourceRef.current === 'youtube'
+                  if (wantVideo && surface) {
+                    const iframe = ytHostRef.current?.querySelector('iframe')
+                    if (iframe) {
+                      surface.innerHTML = ''
+                      surface.appendChild(iframe)
+                      iframe.style.width = '100%'
+                      iframe.style.height = '100%'
+                      iframe.style.position = 'absolute'
+                      iframe.style.inset = '0'
+                    }
+                  }
                 },
                 onStateChange: ({ data }) => {
                   if (!isActive()) return
@@ -189,6 +298,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           if (cancelled || !current.videoId) return
           player.setVolume(volumeRef.current)
           player.loadVideoById(current.videoId)
+          // After load, ensure iframe placement matches video mode
+          requestAnimationFrame(() => placeYouTubeIframe(showVideo))
         })
         .catch(() => {
           setIsLoading(false)
@@ -197,6 +308,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } else {
       ytRef.current?.pauseVideo()
       void (async () => {
+        // Prefer local blob (download or listen cache) for zero-buffer start
         const saved = await offlineStore.get(current.id).catch(() => undefined)
         const listened = saved ? undefined : await listenCache.get(current.id).catch(() => undefined)
         if (cancelled || !audio) return
@@ -208,6 +320,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           src = URL.createObjectURL(blob)
           objectUrlRef.current = src
           if (listened) void listenCache.touch(listened).catch(() => {})
+          // Blob URL is local — often ready immediately
+          setIsLoading(false)
         } else if (!navigator.onLine) {
           setIsLoading(false)
           toast.error("You're offline and this track isn't downloaded.")
@@ -218,9 +332,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         audio
           .play()
           .then(async () => {
-            // Keep this song for next time, then get the next one in the queue ready.
             await cacheForReplay(current)
-            if (!cancelled) await cacheForReplay(upcomingRef.current)
+            if (!cancelled) await prefetchQueue(index + 1)
           })
           .catch(() => {
             setIsLoading(false)
@@ -234,7 +347,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, playKey, getYouTube])
 
-  // Load the YouTube player in the background so the first song starts faster.
+  // Warm the YouTube player so the first song starts faster.
   useEffect(() => {
     const warm = () => void getYouTube().catch(() => {})
     if ('requestIdleCallback' in window) {
@@ -245,7 +358,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(id)
   }, [getYouTube])
 
-  // The YouTube player has no time events, so poll while it plays.
+  // Poll YouTube progress while playing.
   useEffect(() => {
     if (current?.source !== 'youtube' || !isPlaying) return
     const timer = window.setInterval(() => {
@@ -257,6 +370,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }, 500)
     return () => window.clearInterval(timer)
   }, [current?.source, isPlaying])
+
+  // Prefetch when queue advances.
+  useEffect(() => {
+    if (index >= 0) void prefetchQueue(index + 1)
+  }, [index, prefetchQueue])
 
   const stop = () => {
     audioRef.current?.pause()
@@ -279,17 +397,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setIndex(0)
     }
     setPlayKey((k) => k + 1)
-  }, [])
+    if (track.source === 'jamendo') void cacheForReplay(track)
+  }, [cacheForReplay])
 
   const addToQueue = (track: Track) => {
     setQueue((q) => [...q, track])
     if (index < 0) playAt(queue.length)
+    if (track.source === 'jamendo') void cacheForReplay(track)
     toast.success(`Added “${track.title}” to your queue`)
   }
 
   const playNext = (track: Track) => {
     if (index < 0) return play(track)
     setQueue((q) => [...q.slice(0, index + 1), track, ...q.slice(index + 1)])
+    if (track.source === 'jamendo') void cacheForReplay(track)
     toast.success(`“${track.title}” plays next`)
   }
 
@@ -341,7 +462,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   actionsRef.current = { next, prev, toggle }
 
-  // Lock screen and hardware media keys.
   useEffect(() => {
     if (!current || !('mediaSession' in navigator)) return
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -356,7 +476,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     navigator.mediaSession.setActionHandler('previoustrack', () => actionsRef.current.prev())
   }, [current])
 
-  // Rebuilt only when what the controls show changes, never on position ticks.
   const api = useMemo<PlayerApi>(
     () => ({
       queue,
@@ -365,6 +484,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isPlaying,
       isLoading,
       volume,
+      videoMode,
+      setVideoMode,
+      showVideo,
       play,
       playAt,
       addToQueue,
@@ -377,9 +499,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       seek,
       setVolume,
     }),
-    // The actions read only the state listed here (position comes from a ref).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [queue, index, current, isPlaying, isLoading, volume, play, playAt],
+    [queue, index, current, isPlaying, isLoading, volume, videoMode, showVideo, play, playAt, setVideoMode],
   )
   const progress = useMemo(() => ({ position, duration }), [position, duration])
 
@@ -387,10 +508,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     <PlayerContext.Provider value={api}>
       <ProgressContext.Provider value={progress}>
         {children}
+        {/* Hidden host for the YouTube iframe when audio-only */}
         <div
           ref={ytHostRef}
           aria-hidden="true"
           className="pointer-events-none fixed bottom-0 left-0 h-px w-px overflow-hidden opacity-0"
+        />
+        {/* Visible video surface — iframe is moved here in video mode */}
+        <div
+          ref={videoSurfaceRef}
+          id="tm-video-surface"
+          className={
+            showVideo
+              ? 'fixed right-4 bottom-24 z-50 aspect-video w-[min(100vw-2rem,22rem)] overflow-hidden rounded-xl border bg-black shadow-2xl sm:w-96'
+              : 'pointer-events-none fixed h-px w-px overflow-hidden opacity-0'
+          }
+          aria-hidden={!showVideo}
         />
       </ProgressContext.Provider>
     </PlayerContext.Provider>

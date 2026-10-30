@@ -15,19 +15,31 @@ export interface ListenedTrack {
   playedAt: number
 }
 
+/** Local playlist stored only on this device. */
+export interface LocalPlaylist {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  tracks: Track[]
+}
+
 const DB_NAME = 'tunemantra'
 const STORE = 'downloads'
 const LISTENED = 'listened'
-/** The listening cache keeps the most recently played songs and drops older ones. */
-const MAX_LISTENED = 40
+const PLAYLISTS = 'playlists'
+/** Larger listen cache so recent plays start from disk with almost no buffer. */
+const MAX_LISTENED = 80
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2)
+    // v3 adds the playlists object store
+    const req = indexedDB.open(DB_NAME, 3)
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'track.id' })
       if (!db.objectStoreNames.contains(LISTENED)) db.createObjectStore(LISTENED, { keyPath: 'id' })
+      if (!db.objectStoreNames.contains(PLAYLISTS)) db.createObjectStore(PLAYLISTS, { keyPath: 'id' })
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
@@ -61,6 +73,7 @@ export const offlineStore = {
 export const listenCache = {
   get: (id: string) =>
     run<ListenedTrack | undefined>('readonly', (s) => s.get(id) as IDBRequest<ListenedTrack | undefined>, LISTENED),
+  has: async (id: string) => Boolean(await listenCache.get(id).catch(() => undefined)),
   put: async (entry: ListenedTrack) => {
     await run('readwrite', (s) => s.put(entry), LISTENED)
     const all = await run<ListenedTrack[]>('readonly', (s) => s.getAll() as IDBRequest<ListenedTrack[]>, LISTENED)
@@ -68,4 +81,17 @@ export const listenCache = {
     for (const old of stale) await run('readwrite', (s) => s.delete(old.id), LISTENED)
   },
   touch: (entry: ListenedTrack) => run('readwrite', (s) => s.put({ ...entry, playedAt: Date.now() }), LISTENED),
+}
+
+export const playlistStore = {
+  all: () =>
+    run<LocalPlaylist[]>('readonly', (s) => s.getAll() as IDBRequest<LocalPlaylist[]>, PLAYLISTS),
+  get: (id: string) =>
+    run<LocalPlaylist | undefined>(
+      'readonly',
+      (s) => s.get(id) as IDBRequest<LocalPlaylist | undefined>,
+      PLAYLISTS,
+    ),
+  put: (playlist: LocalPlaylist) => run('readwrite', (s) => s.put(playlist), PLAYLISTS),
+  remove: (id: string) => run('readwrite', (s) => s.delete(id), PLAYLISTS),
 }

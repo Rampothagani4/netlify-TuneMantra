@@ -1,7 +1,19 @@
-import { Loader2, Pause, Play, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react'
+import {
+  Loader2,
+  MonitorPlay,
+  Music2,
+  Pause,
+  Play,
+  SkipBack,
+  SkipForward,
+  Volume1,
+  Volume2,
+  VolumeX,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { usePlayer, usePlayerProgress } from '@/components/player/PlayerProvider'
 import { formatTime } from '@/lib/tracks'
+import { cn } from '@/lib/utils'
 import { Artwork } from './Artwork'
 import { ReactionButtons } from './ReactionButtons'
 
@@ -11,6 +23,7 @@ export function PlayerBar() {
   const { current } = p
   const duration = playedDuration || current?.duration || 0
   const VolumeIcon = p.volume === 0 ? VolumeX : p.volume < 50 ? Volume1 : Volume2
+  const canToggleVideo = current?.source === 'youtube'
 
   return (
     <div
@@ -23,7 +36,9 @@ export function PlayerBar() {
           <Artwork track={current} className="size-11" />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{current?.title ?? 'TuneMantra'}</p>
-            <p className="truncate text-xs text-muted-foreground">{current?.artist ?? 'Search to start listening'}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {current?.artist ?? 'Search to start listening'}
+            </p>
           </div>
           {current && <ReactionButtons track={current} className="hidden shrink-0 sm:flex" />}
         </div>
@@ -70,27 +85,48 @@ export function PlayerBar() {
           </div>
         </div>
 
-        <div className="hidden w-40 items-center gap-2 lg:flex">
+        <div className="flex items-center gap-1 sm:gap-2">
+          {/* Audio / Video toggle — only meaningful for YouTube tracks */}
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={() => p.setVolume(p.volume === 0 ? 80 : 0)}
-            aria-label={p.volume === 0 ? 'Unmute' : 'Mute'}
+            disabled={!canToggleVideo && !p.videoMode}
+            onClick={() => p.setVideoMode(!p.videoMode)}
+            aria-label={p.videoMode ? 'Switch to audio only' : 'Show video'}
+            aria-pressed={p.videoMode}
+            title={
+              canToggleVideo
+                ? p.videoMode
+                  ? 'Video on — click for audio only'
+                  : 'Audio only — click to show video'
+                : 'Video mode applies to YouTube songs'
+            }
+            className={cn(p.videoMode && 'text-primary')}
           >
-            <VolumeIcon />
+            {p.videoMode ? <MonitorPlay className="size-4" /> : <Music2 className="size-4" />}
           </Button>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={p.volume}
-            onChange={(e) => p.setVolume(Number(e.target.value))}
-            className="tm-range h-1 flex-1"
-            aria-label="Volume"
-          />
+
+          <div className="hidden w-32 items-center gap-2 lg:flex">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => p.setVolume(p.volume === 0 ? 80 : 0)}
+              aria-label={p.volume === 0 ? 'Unmute' : 'Mute'}
+            >
+              <VolumeIcon />
+            </Button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={p.volume}
+              onChange={(e) => p.setVolume(Number(e.target.value))}
+              className="tm-range h-1 flex-1"
+              aria-label="Volume"
+            />
+          </div>
         </div>
       </div>
-      {/* Thin progress line for small screens, where the seek bar is hidden. */}
       <div className="h-0.5 bg-muted sm:hidden" aria-hidden>
         <div className="h-full bg-primary" style={{ width: duration ? `${(position / duration) * 100}%` : 0 }} />
       </div>

@@ -7,6 +7,7 @@ import { IdentityProvider } from '@/components/IdentityProvider'
 import { PlayerProvider } from '@/components/player/PlayerProvider'
 import { DownloadsProvider } from '@/components/player/DownloadsProvider'
 import { ReactionsProvider } from '@/components/player/ReactionsProvider'
+import { PlaylistsProvider } from '@/components/player/PlaylistsProvider'
 
 import '../styles.css'
 
@@ -75,7 +76,9 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           <IdentityProvider>
             <ReactionsProvider>
               <DownloadsProvider>
-                <PlayerProvider>{children}</PlayerProvider>
+                <PlaylistsProvider>
+                  <PlayerProvider>{children}</PlayerProvider>
+                </PlaylistsProvider>
               </DownloadsProvider>
             </ReactionsProvider>
           </IdentityProvider>

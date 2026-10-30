@@ -1,14 +1,31 @@
 import type { ReactNode } from 'react'
-import { Check, Download, ListEnd, ListPlus, Loader2, MoreHorizontal, Pause, Play } from 'lucide-react'
+import {
+  Check,
+  Download,
+  ListEnd,
+  ListMusic,
+  ListPlus,
+  Loader2,
+  MoreHorizontal,
+  Pause,
+  Play,
+  Plus,
+  Share2,
+} from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { usePlayer } from '@/components/player/PlayerProvider'
 import { useDownloads } from '@/components/player/DownloadsProvider'
+import { usePlaylists } from '@/components/player/PlaylistsProvider'
 import { useIdentity } from '@/components/IdentityProvider'
 import { canDownload, formatTime, type Track } from '@/lib/tracks'
 import { cn } from '@/lib/utils'
@@ -26,6 +43,7 @@ interface TrackRowProps {
 export function TrackRow({ track, list, position, onRequireSignIn, trailing }: TrackRowProps) {
   const player = usePlayer()
   const downloads = useDownloads()
+  const { playlists, create, addTrack } = usePlaylists()
   const { user } = useIdentity()
   const isCurrent = player.current?.id === track.id
   const saved = downloads.isSaved(track.id)
@@ -34,6 +52,30 @@ export function TrackRow({ track, list, position, onRequireSignIn, trailing }: T
 
   const onPlay = () => (isCurrent ? player.toggle() : player.play(track, list))
   const onDownload = () => (user ? void downloads.download(track) : onRequireSignIn())
+
+  const onShare = async () => {
+    const text = `${track.title} — ${track.artist}`
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: track.title, text })
+      } else {
+        await navigator.clipboard.writeText(text)
+        toast.success('Copied song name')
+      }
+    } catch {
+      try {
+        await navigator.clipboard.writeText(text)
+        toast.success('Copied song name')
+      } catch {
+        toast.error('Could not share')
+      }
+    }
+  }
+
+  const addToNewPlaylist = async () => {
+    const pl = await create(`${track.title.slice(0, 24)} mix`)
+    await addTrack(pl.id, track)
+  }
 
   return (
     <li
@@ -90,6 +132,29 @@ export function TrackRow({ track, list, position, onRequireSignIn, trailing }: T
           <DropdownMenuItem onSelect={() => player.addToQueue(track)}>
             <ListPlus /> Add to queue
           </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void onShare()}>
+            <Share2 /> Share
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <ListMusic /> Add to playlist
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="max-h-64 overflow-y-auto">
+              <DropdownMenuItem onSelect={() => void addToNewPlaylist()}>
+                <Plus /> New playlist
+              </DropdownMenuItem>
+              {playlists.map((pl) => (
+                <DropdownMenuItem key={pl.id} onSelect={() => void addTrack(pl.id, track)}>
+                  {pl.name}
+                </DropdownMenuItem>
+              ))}
+              {playlists.length === 0 && (
+                <DropdownMenuItem disabled className="text-muted-foreground">
+                  No playlists yet
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           {canDownload(track) && !saved && (
             <DropdownMenuItem onSelect={onDownload}>
               <Download /> Download for offline
